@@ -16,6 +16,8 @@ import _damon
 PERF = 'perf'
 PERF_EVENT = 'damon:damon_aggregated'
 
+checkcnt_sum = 0
+
 class DamonSnapshot:
     '''
     Contains a snapshot of data access monitoring results
@@ -154,6 +156,7 @@ def adjusted_snapshots(snapshots, aggregate_interval_us):
     return adjusted
 
 def adjust_records(records, aggregate_interval, nr_snapshots_to_skip):
+    print("looks like we are adjusting records")
     for record in records:
         if record.intervals != None:
             record.intervals.aggr = aggregate_interval
@@ -270,14 +273,16 @@ def parse_perf_script_line(line):
 
         kdamond.0  4452 [000] 82877.315633: damon:damon_aggregated: \
                 target_id=18446623435582458880 nr_regions=17 \
-                140731667070976-140731668037632: 0 3
+                140731667070976-140731668037632: 0 3 x
 
         Note that the last field is not in the early version[1].
 
         [1] https://lore.kernel.org/linux-mm/df8d52f1fb2f353a62ff34dc09fe99e32ca1f63f.1636610337.git.xhao@linux.alibaba.com/
         '''
+        global checkcnt_sum
+        
         fields = line.strip().split()
-        if not len(fields) in [9, 10]:
+        if not len(fields) in [9, 10, 11]:
             return None, None, None, None
         if fields[4] != 'damon:damon_aggregated:':
             return None, None, None, None
@@ -288,10 +293,18 @@ def parse_perf_script_line(line):
 
         start_addr, end_addr = [int(x) for x in fields[7][:-1].split('-')]
         nr_accesses = int(fields[8])
+        
         if len(fields) == 10:
             age = int(fields[9])
         else:
             age = None
+        
+        if len(fields) == 11:
+            check_cnt = int(fields[10])
+            checkcnt_sum += check_cnt
+        else:
+            check_cnt = None
+        
         region = _damon.DamonRegion(start_addr, end_addr,
                 nr_accesses, _damon.unit_samples,
                 age, _damon.unit_aggr_intervals)
@@ -538,6 +551,8 @@ def stop_monitoring_record(perf_pipe):
 
     err = update_records_file(file_path, file_format, file_permission,
             monitoring_intervals)
+    # print number of memory access checks
+    print(f"# of memory access: {checkcnt_sum}")
     if err != None:
         print('converting format from perf_data to %s failed (%s)' %
                 (file_format, err))
